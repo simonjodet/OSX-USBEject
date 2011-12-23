@@ -1,85 +1,88 @@
-#!/usr/bin/php
-<?php
+#!/usr/bin/env ruby
 
-// External drives eject tool.
-// You need to install growlnotify from http://growl.info/extras.php#growlnotify
-// It will eject all USB disks and all mounted images. It will warn you with a red icon if something goes wrong
-// It starts from the bottom to the top to tentavily eject the mounted images before the drive they could be on.
-// 
-// Advices:
-// - Use Automator to make this script an app
-// - Install Better Touch Tool (http://www.boastr.de/) to give it a global shortcut
-// Copyright (C) <2011> <Simon Jodet>
-// 
-// Permission is hereby granted, free of charge, to any person obtaining a copy of
-// this software and associated documentation files (the "Software"), to deal in
-// the Software without restriction, including without limitation the rights to
-// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-// of the Software, and to permit persons to whom the Software is furnished to do
-// so, subject to the following conditions:
-// 
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-// 
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+# External USB drives eject tool.
+# You should install growlnotify to get notifications from http://growl.info/extras.php#growlnotify
+# It will eject all USB disks and all mounted images. It will warn you with a red icon if something goes wrong
+# It starts from the bottom to the top to tentavily eject the mounted images before the drive they could be on.
+# 
+# Advices:
+# - Use Automator to make this script an app
+# - Install Better Touch Tool (http://www.boastr.de/) to give it a global shortcut
 
-$drives = array();
-$output = array();
+# Copyright (C) <2011> <Simon Jodet>
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+# of the Software, and to permit persons to whom the Software is furnished to do
+# so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
-exec('diskutil list',$output);
-if(is_array($output) && count($output) > 0) {
-    foreach($output as $line) {
-        if(substr($line,0,4) == '/dev'){
-            $drives[] = $line;
-        }
-    }
+require "open3"
+
+drives = Array.new()
+
+cmd = 'diskutil list'
+stdin, stdout, stderr = Open3.popen3(cmd)
+stdout = stdout.readlines
+
+stdout.each { |line| 
+  if line[0,4] == '/dev'
+    drives << line
+  end
 }
 
-if(is_array($drives) && count($drives) > 0) {
-    $drives = array_reverse($drives);
-    foreach($drives as $drive) {
-        $drive = $drive;
-        $output = array();
-        exec('diskutil info '.$drive,$output);
-        if(is_array($output) && count($output) > 0) {
-            $volume_name = $drive;
-            foreach($output as $line) {
-                if(strpos($line, 'Media Name:') !== false)
-                {
-                    $volume_name = substr($line,trim(strpos($line, ':')+1));
-                }
-                if(strpos($line, 'Protocol:') !== false && (strpos($line, 'USB') !== false || strpos($line, 'Disk Image') !== false)){
-                    if(strpos($line, 'Disk Image') !== false){
-                        exec('diskutil info '.$drive.'s2',$image_output);
-                        if(is_array($image_output) && count($image_output) > 0) {
-                            foreach($image_output as $image_line) {
-                                if(strpos($image_line, 'Volume Name:') !== false)
-                                {
-                                    $volume_name = substr($image_line,trim(strpos($image_line, ':')+1));
-                                }
-                            }
-                        }
-                    }
-                    $output = array();
-                    exec('hdiutil detach '.$drive.' 2>&1 >/dev/null',$output);
-                    if(count($output) > 0){
-                        exec('/usr/local/bin/growlnotify -m"'.$drive.':'.$volume_name.' could NOT be detached: '.$output[0].'" --image "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/AlertStopIcon.icns" USB Eject');
-                        sleep(1);
-                        break;                        
-                    }
-                    else {
-                        exec('/usr/local/bin/growlnotify -m"'.$drive.':'.$volume_name.' has been detached" --image "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/EjectMediaIcon.icns" USB Eject');
-                        sleep(1);
-                        break;
-                    }
-                }
+if !drives.empty?
+  drives = drives.reverse
+  drives.each { |drive| 
+    cmd = 'diskutil info ' + drive
+    stdin, stdout, stderr = Open3.popen3(cmd)
+    stdout = stdout.readlines
+    if !stdout.empty?
+      volume_name = drive
+      stdout.each { |line| 
+        if !line.index('Media Name:').nil?
+          pos = line.index(':')+1
+          volume_name = line.slice(pos,line.length-pos).strip
+        end
+        if !line.index('Protocol:').nil? and (!line.index('USB').nil? or !line.index('Disk Image').nil?)
+          if !line.index('Disk Image').nil?
+            image_cmd = 'diskutil info ' + drive.strip + 's2'
+            image_stdin, image_stdout, image_stderr = Open3.popen3(image_cmd)
+            image_stdout = image_stdout.readlines
+            image_stdout.each { |image_line| 
+              if !image_line.index('Volume Name:').nil?
+                pos = image_line.index(':')+1
+                volume_name = image_line.slice(pos,image_line.length-pos).strip
+              end
             }
-        }
-    }
-}
+          end
+          cmd = 'hdiutil detach ' + drive.strip
+          stdin, stdout, stderr = Open3.popen3(cmd)
+          stdout = stdout.readlines
+          stderr = stderr.readlines
+          if !stderr.empty?
+            Open3.popen3('/usr/local/bin/growlnotify -m"' + volume_name + ' could NOT be detached: \"' + stderr.to_s.strip + '\"" --image "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/AlertStopIcon.icns" USB Eject')
+            sleep 1
+            next
+          else
+            Open3.popen3('/usr/local/bin/growlnotify -m"' + volume_name + ' has been detached" --image "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/EjectMediaIcon.icns" USB Eject')
+            sleep 1
+            next
+          end
+        end
+      }
+    end
+  }
+end
